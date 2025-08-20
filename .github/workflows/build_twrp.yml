@@ -1,0 +1,238 @@
+name: ⚒️ Build TWRP Recovery
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: '📱 Select device model to build'
+        required: false
+        type: choice
+        options:
+          - 'all'
+          - 'SM-A546B'
+          - 'SM-A546E'
+          - 'SM-A546U'
+          - 'SM-A546U1'
+          - 'SM-A546S'
+          - 'SM-A546W'
+          - 'SM-A5460'
+          - 'SM-A546V'
+        default: 'all'
+      clean_build:
+        description: '🧹 Clean build'
+        required: false
+        type: boolean
+        default: false
+
+env:
+  DEVICE_TREE_URL: https://github.com/daglaroglou/android_device_samsung_a54x.git
+  TWRP_MANIFEST: https://github.com/minimal-manifest-twrp/platform_manifest_twrp_aosp.git
+
+jobs:
+  build_recovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 480
+
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ github.event.inputs.target == 'all' && fromJson('["SM-A546B", "SM-A546E", "SM-A546U", "SM-A546U1", "SM-A546S", "SM-A546W", "SM-A5460", "SM-A546V"]') || fromJson(format('["{0}"]', github.event.inputs.target || 'SM-A546B')) }}
+        
+    steps:          
+      - name: 🧹 Free up system space
+        uses: rokibhasansagar/slimhub_actions@main
+        
+      - name: 📂 Checkout device tree
+        uses: actions/checkout@v4
+        
+      - name: ☕ Setup Java JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: 🐍 Setup Python environment
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 💾 Configure swap space
+        uses: pierotofy/set-swap-space@master
+        with:
+          swap-size-gb: 12
+
+      - name: 📅 Set build variables
+        run: |
+          echo "TARGET_DEVICE=${{ matrix.target }}" >> $GITHUB_ENV
+          echo "DATE=$(date +'%Y-%m-%d')" >> $GITHUB_ENV
+
+      - name: 🛠️ Install repo tool
+        run: |
+          echo "📦 Installing Google repo tool..."
+          mkdir -p ~/bin
+          curl --retry 3 --retry-delay 5 -o ~/bin/repo https://storage.googleapis.com/git-repo-downloads/repo
+          chmod a+x ~/bin/repo
+          sudo ln -sf ~/bin/repo /usr/bin/repo
+          echo "✅ Repo tool installed successfully"
+
+      - name: 🔧 Setup build environment
+        run: |
+          echo "🔧 Setting up Android build environment..."
+          
+          # Install basic dependencies
+          sudo apt-get update -qq
+          sudo apt-get install -y git aria2 ccache
+          
+          # Setup build environment using OrangeFox scripts
+          git clone --depth=1 https://gitlab.com/OrangeFox/misc/scripts ~/scripts
+          cd ~/scripts
+          sudo bash setup/android_build_env.sh
+          sed -i 's/cd -/cd ../g' setup/install_android_sdk.sh
+          sudo bash setup/install_android_sdk.sh
+
+          # Configure git
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config --global color.ui true
+          
+          echo "✅ Build environment ready!"
+
+      - name: 📱 Prepare device-specific files
+        run: |
+          echo "📱 Preparing files for ${{ matrix.target }}..."
+          mkdir -p ~/twrp-build
+          
+          # Download magiskboot
+          echo "⬬ Downloading magiskboot..."
+          curl --retry 3 --retry-delay 5 -o ~/bin/magiskboot https://raw.githubusercontent.com/Vaz15k/literate-potato/master/Tools/magiskboot
+          chmod +x ~/bin/magiskboot
+          sudo ln -sf ~/bin/magiskboot /usr/bin/magiskboot
+          
+          # Download device recovery image
+          echo "⬬ Downloading recovery image for ${{ matrix.target }}..."
+          curl --retry 5 --retry-delay 5 -o ~/twrp-build/recovery-${{ matrix.target }}.img https://raw.githubusercontent.com/Vaz15k/literate-potato/master/Imagens/${{ matrix.target }}/recovery.img
+          
+          echo "✅ Device files ready!"
+
+      - name: 🔄 Initialize TWRP source
+        run: |
+          echo "🔄 Initializing TWRP 12.1 source..."
+          mkdir -p twrp-12.1
+          cd twrp-12.1
+          
+          repo init --depth=1 -u ${{ env.TWRP_MANIFEST }} -b twrp-12.1
+          
+          echo "✅ Source initialized!"
+
+      - name: ⬇️ Sync TWRP source
+        run: |
+          echo "⬇️ Syncing TWRP source tree..."
+          cd twrp-12.1
+          
+          repo sync -c -j$(nproc --all) --force-sync --no-tags --no-clone-bundle
+          
+          echo "✅ Source sync completed!"
+
+      - name: 🌳 Clone device tree
+        run: |
+          echo "🌳 Cloning Samsung A54x device tree..."
+          cd twrp-12.1
+          
+          git clone --depth=1 --branch twrp-12.1 ${{ env.DEVICE_TREE_URL }} device/samsung/a54x
+          
+          echo "✅ Device tree cloned!"
+
+      - name: 🛠️ Setup ccache
+        if: github.event.inputs.clean_build != 'true'
+        run: |
+          echo "🛠️ Configuring ccache for faster builds..."
+          cd twrp-12.1
+          export USE_CCACHE=1
+          export CCACHE_DIR=~/.ccache
+          ccache -M 8G
+          ccache -z
+          echo "✅ Ccache configured!"
+
+      - name: 🔨 Build TWRP Recovery
+        run: |
+          echo "🔨 Building TWRP for ${{ matrix.target }}..."
+          cd twrp-12.1
+          
+          # Setup build environment
+          export ALLOW_MISSING_DEPENDENCIES=true
+          export TW_DEFAULT_LANGUAGE="en"
+          
+          # Clean build if requested
+          if [[ "${{ github.event.inputs.clean_build }}" == "true" ]]; then
+            echo "🧹 Performing clean build..."
+            make clean
+          fi
+          
+          # Build recovery
+          source build/envsetup.sh
+          lunch twrp_a54x-eng
+          
+          echo "🚀 Starting compilation..."
+          mka recoveryimage -j$(nproc --all)
+          
+          echo "✅ Build completed successfully!"
+
+      - name: 📦 Package recovery image
+        run: |
+          echo "📦 Packaging TWRP for ${{ matrix.target }}..."
+          mkdir -p ~/files
+          
+          # Copy recovery image
+          cp twrp-12.1/out/target/product/a54x/recovery.img ~/twrp-build/twrp.img
+          
+          cd ~/twrp-build
+          
+          # Repack with device-specific boot image
+          echo "🔄 Repacking recovery image..."
+          magiskboot unpack twrp.img
+          magiskboot repack recovery-${{ matrix.target }}.img recovery.img
+          
+          # Create release package
+          PACKAGE_NAME="TWRP-${{ matrix.target }}_${{ env.DATE }}.tar"
+          tar cf "$PACKAGE_NAME" recovery.img
+          
+          # Copy to release directory
+          cp TWRP* ~/files/
+          
+          # Show package info
+          echo "📊 Package Information:"
+          ls -la ~/files/
+          echo "📏 Package size: $(du -h ~/files/$PACKAGE_NAME | cut -f1)"
+          echo "✅ Package ready for release!"
+
+      - name: 🚀 Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: /home/runner/files/TWRP*
+          name: "TWRP Recovery - ${{ env.DATE }}"
+          tag_name: "twrp-${{ env.DATE }}"
+          body: |
+            ### Features
+            - Full touch interface
+            - ADB support
+            - MTP support
+            - Decrypt data partition
+            - Backup and restore
+            - LichUI support
+            
+            ### Important Notes
+            - **VBMeta Patched**: https://github.com/Vaz15k/proprietary_vendor_samsung_a54x/releases
+            - Always backup your current recovery before flashing
+            - Ensure you download the correct file for your device model
+            ---
+            <div align="center">
+            <b>Special Thanks:</b><br>
+            - <b>@Vaz15k</b> for device images and resources<br>
+            - <b>@salvogiangri</b> for TWRP tree<br>
+            - <b><a href="https://gitlab.com/OrangeFox">OrangeFox Team</a></b> for build scripts
+            </div>
+          draft: false
+          prerelease: false
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
