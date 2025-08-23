@@ -125,10 +125,26 @@ TW_INCLUDE_REPACKTOOLS := true
 TW_INCLUDE_LPDUMP := true
 TW_INCLUDE_LPTOOLS := true
 
-# Change status bar layout
-TW_USE_NEW_STATUSBAR := true
-TW_STATUS_ICONS_ALIGN := center
-TW_CUSTOM_CPU_POS := 250
-TW_CUSTOM_CLOCK_POS := 50
-TW_CUSTOM_BATTERY_POS := 810
-TW_STATUS_HEIGHT := 70
+# SHRP specific
+SHRP_DEVICE_CODE := a54x
+SHRP_PATH := device/samsung/$(SHRP_DEVICE_CODE)
+SHRP_MAINTAINER := daglaroglou
+SHRP_REC_TYPE := Treble
+SHRP_DEVICE_TYPE := A/B
+SHRP_REC := "/dev/block/bootdevice/by-name/recovery"
+SHRP_HAS_RECOVERY_PARTITION := true
+SHRP_AB := true
+SHRP_EDL_MODE := 1
+SHRP_INTERNAL := "/sdcard"
+SHRP_EXTERNAL := "/external_sd"
+SHRP_OTG := "/usb_otg"
+SHRP_FLASH := 1
+SHRP_STATUSBAR_RIGHT_PADDING := 58
+SHRP_STATUSBAR_LEFT_PADDING := 58
+SHRP_NOTCH := true
+SHRP_EXPRESS := true
+SHRP_EXPRESS_USE_DATA := true
+SHRP_DARK := true
+SHRP_CUSTOM_FLASHLIGHT := true
+SHRP_FONP_1 := "/sys/devices/virtual/camera/flash/rear_flash"
+SHRP_FLASH_MAX_BRIGHTNESS := 200
