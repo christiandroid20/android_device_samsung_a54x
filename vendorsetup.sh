@@ -27,7 +27,8 @@ export FOX_USE_XZ_UTILS=1
 export FOX_DELETE_AROMAFM=1
 export FOX_DELETE_MAGISK_ADDON=1
 
-export OF_FL_PATH1="/sys/devices/virtual/camera/flash/rear_flash"
+export OF_FL_PATH1="/tmp/flashlight"
+export OF_FL_PATH2="/sys/devices/virtual/camera/flash/rear_flash"
 export OF_FLASHLIGHT_ENABLE=1
 
 export OF_USE_MAGISKBOOT=1
