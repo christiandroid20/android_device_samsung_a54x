@@ -1,0 +1,850 @@
+name: Build Recoveries
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Select device model to build'
+        required: false
+        type: choice
+        options:
+          - 'All models'
+          - 'SM-A546B'
+          - 'SM-A546E'
+          - 'SM-A546U'
+          - 'SM-A546U1'
+          - 'SM-A546S'
+          - 'SM-A546W'
+          - 'SM-A5460'
+          - 'SM-A546V'
+        default: 'All models'
+      products:
+        description: 'Select products to build'
+        required: false
+        type: choice
+        options:
+          - 'All products'
+          - 'TWRP'
+          - 'PBRP'
+          - 'SHRP'
+          - 'OrangeFox'
+        default: 'All products'
+      clean_build:
+        description: 'Clean build'
+        required: false
+        type: boolean
+        default: false
+
+env:
+  DEVICE_TREE_URL: https://github.com/daglaroglou/android_device_samsung_a54x.git
+  TWRP_MANIFEST: https://github.com/minimal-manifest-twrp/platform_manifest_twrp_aosp.git
+  PBRP_MANIFEST: https://github.com/PitchBlackRecoveryProject/manifest_pb.git
+  SHRP_MANIFEST: https://github.com/SHRP-Reborn/manifest.git
+  ORANGEFOX_MANIFEST: https://gitlab.com/OrangeFox/sync.git
+
+jobs:
+  setup:
+    name: Setup Build Matrix
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - name: Set matrix
+        id: set-matrix
+        run: |
+          if [ "${{ github.event.inputs.products }}" == "All products" ]; then
+            echo 'matrix=["TWRP", "PBRP", "SHRP", "OrangeFox"]' >> $GITHUB_OUTPUT
+          else
+            echo 'matrix=["${{ github.event.inputs.products }}"]' >> $GITHUB_OUTPUT
+          fi
+
+  notify_workflow:
+    name: Notify Build Start
+    needs: setup
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send Telegram Notification
+        run: |
+          curl -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+            -F chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
+            -F message_thread_id="${{ secrets.TELEGRAM_MESSAGE_THREAD_ID }}" \
+            -F text="
+            🚀 Build started for Recovery! 
+            📦 *Repository:* [${{ github.repository }}](https://github.com/${{ github.repository }})
+            🗂️ *Products:* ${{ github.event.inputs.products }}
+            🎯 *Target:* ${{ github.event.inputs.target }}
+            ✏️ *Commit:* [${{ github.sha }}](https://github.com/${{ github.repository }}/commit/${{ github.sha }})
+            [🔗 View GitHub Run](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})" \
+            -F parse_mode="Markdown"
+
+  build_twrp:
+    name: Build TWRP
+    needs: [setup, notify_workflow]
+    runs-on: ubuntu-latest
+    timeout-minutes: 480
+    if: ${{ contains(needs.setup.outputs.matrix, 'TWRP') }}
+    
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ github.event.inputs.target == 'All models' && fromJson('["SM-A546B", "SM-A546E", "SM-A546U", "SM-A546U1", "SM-A546S", "SM-A546W", "SM-A5460", "SM-A546V"]') || fromJson(format('["{0}"]', github.event.inputs.target || 'SM-A546B')) }}
+        
+    steps:          
+      - name: Free up system space
+        uses: rokibhasansagar/slimhub_actions@main
+        
+      - name: Checkout device tree
+        uses: actions/checkout@v4
+        
+      - name: Setup Java JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Python environment
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Configure swap space
+        uses: pierotofy/set-swap-space@master
+        with:
+          swap-size-gb: 12
+
+      - name: Set build variables
+        run: |
+          echo "TARGET_DEVICE=${{ matrix.target }}" >> $GITHUB_ENV
+          echo "RECOVERY_TYPE=TWRP" >> $GITHUB_ENV
+          echo "DATE=$(date +'%Y-%m-%d')" >> $GITHUB_ENV
+
+      - name: Install repo tool
+        run: |
+          mkdir -p ~/bin
+          curl --retry 3 --retry-delay 5 -o ~/bin/repo https://storage.googleapis.com/git-repo-downloads/repo
+          chmod a+x ~/bin/repo
+          sudo ln -sf ~/bin/repo /usr/bin/repo
+
+      - name: Setup build environment
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y git aria2 ccache
+
+          git clone --depth=1 https://gitlab.com/OrangeFox/misc/scripts ~/scripts
+          cd ~/scripts
+          sudo bash setup/android_build_env.sh
+          sed -i 's/cd -/cd ../g' setup/install_android_sdk.sh
+          sudo bash setup/install_android_sdk.sh
+
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git config --global color.ui true
+      
+      - name: Make directories
+        run: |
+          mkdir -p $HOME/twrp-12.1
+          mkdir -p $HOME/twrp-build
+          mkdir -p $HOME/files
+
+      - name: Prepare device-specific files
+        run: |
+          curl --retry 3 --retry-delay 5 -o ~/bin/magiskboot https://raw.githubusercontent.com/Vaz15k/literate-potato/master/Tools/magiskboot
+          chmod +x ~/bin/magiskboot
+          sudo ln -sf ~/bin/magiskboot /usr/bin/magiskboot
+          curl --retry 5 --retry-delay 5 -o ~/twrp-build/recovery-${{ matrix.target }}.img https://raw.githubusercontent.com/Vaz15k/literate-potato/master/Imagens/${{ matrix.target }}/recovery.img
+
+      - name: Initialize TWRP source
+        run: |
+          cd $HOME/twrp-12.1
+          repo init -u $TWRP_MANIFEST -b twrp-12.1 --depth=1
+      
+      - name: Sync TWRP source
+        run: |
+          cd $HOME/twrp-12.1
+          repo sync -j$(nproc --all) --force-sync --no-tags --no-clone-bundle
+
+      - name: Clone device tree
+        run: |
+          cd $HOME/twrp-12.1
+          git clone --depth=1 --branch twrp-12.1 ${{ env.DEVICE_TREE_URL }} device/samsung/a54x
+
+      - name: Setup ccache
+        if: github.event.inputs.clean_build != 'true'
+        run: |
+          cd $HOME/twrp-12.1
+          export USE_CCACHE=1
+          export CCACHE_DIR=~/.ccache
+          ccache -M 8G
+          ccache -z
+
+      - name: Build TWRP Recovery
+        run: |
+          cd $HOME/twrp-12.1
+          export ALLOW_MISSING_DEPENDENCIES=true
+          export TW_DEFAULT_LANGUAGE="en"
+          if [[ "${{ github.event.inputs.clean_build }}" == "true" ]]; then
+            make clean
+          fi
+          source build/envsetup.sh
+          lunch twrp_a54x-eng
+          mka recoveryimage -j$(nproc --all)
+      
+      - name: Package recovery image
+        run: |
+          cp $HOME/twrp-12.1/out/target/product/a54x/recovery.img $HOME/twrp-build/twrp.img
+          cd $HOME/twrp-build
+          magiskboot unpack twrp.img
+          magiskboot repack recovery-${{ matrix.target }}.img recovery.img
+          PACKAGE_NAME="TWRP-${{ matrix.target }}_${{ env.DATE }}.tar"
+          tar cf "$PACKAGE_NAME" recovery.img
+          cp TWRP* $HOME/files/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: /home/runner/files/TWRP*
+          name: "TWRP Recovery - ${{ env.DATE }}"
+          tag_name: "twrp-${{ env.DATE }}"
+          body: |
+            ### Features
+            - Full touch interface
+            - ADB support
+            - MTP support
+            - Decrypt data partition
+            - Backup and restore
+            - LichUI support
+            
+            ### Important Notes
+            - **VBMeta Patched**: https://github.com/Vaz15k/proprietary_vendor_samsung_a54x/releases
+            - Always backup your current recovery before flashing
+            - Ensure you download the correct file for your device model
+            ---
+            <div align="center">
+            <b>Special Thanks:</b><br>
+            - <b>@Vaz15k</b> for device images and resources<br>
+            - <b>@salvogiangri</b> for TWRP tree<br>
+            - <b><a href="https://gitlab.com/OrangeFox">OrangeFox Team</a></b> for build scripts
+            </div>
+          draft: false
+          prerelease: false
+          make_latest: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build_pbrp:
+    name: Build PBRP
+    needs: [setup, notify_workflow]
+    runs-on: ubuntu-latest
+    timeout-minutes: 480
+    if: ${{ contains(needs.setup.outputs.matrix, 'PBRP') }}
+    
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ github.event.inputs.target == 'All models' && fromJson('["SM-A546B", "SM-A546E", "SM-A546U", "SM-A546U1", "SM-A546S", "SM-A546W", "SM-A5460", "SM-A546V"]') || fromJson(format('["{0}"]', github.event.inputs.target || 'SM-A546B')) }}
+        
+    steps:          
+      - name: Free up system space
+        uses: rokibhasansagar/slimhub_actions@main
+        
+      - name: Checkout device tree
+        uses: actions/checkout@v4
+        
+      - name: Setup Java JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Python environment
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Configure swap space
+        uses: pierotofy/set-swap-space@master
+        with:
+          swap-size-gb: 12
+
+      - name: Set build variables
+        run: |
+          echo "TARGET_DEVICE=${{ matrix.target }}" >> $GITHUB_ENV
+          echo "RECOVERY_TYPE=PBRP" >> $GITHUB_ENV
+          echo "DATE=$(date +'%Y-%m-%d')" >> $GITHUB_ENV
+
+      - name: Install repo tool
+        run: |
+          echo "Installing Google repo tool..."
+          mkdir -p ~/bin
+          curl --retry 3 --retry-delay 5 -o ~/bin/repo https://storage.googleapis.com/git-repo-downloads/repo
+          chmod a+x ~/bin/repo
+          sudo ln -sf ~/bin/repo /usr/bin/repo
+          echo "Repo tool installed successfully"
+
+      - name: Setup build environment
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y git aria2 ccache
+
+          git clone --depth=1 https://gitlab.com/OrangeFox/misc/scripts ~/scripts
+          cd ~/scripts
+          sudo bash setup/android_build_env.sh
+          sed -i 's/cd -/cd ../g' setup/install_android_sdk.sh
+          sudo bash setup/install_android_sdk.sh
+
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config --global color.ui true
+
+      - name: Make directories
+        run: |
+          mkdir -p $HOME/pbrp-12.1
+          mkdir -p $HOME/pbrp-build
+          mkdir -p $HOME/files
+
+      - name: Prepare device-specific files
+        run: |
+          curl --retry 3 --retry-delay 5 -o ~/bin/magiskboot https://raw.githubusercontent.com/Vaz15k/literate-potato/master/Tools/magiskboot
+          chmod +x ~/bin/magiskboot
+          sudo ln -sf ~/bin/magiskboot /usr/bin/magiskboot
+          curl --retry 5 --retry-delay 5 -o ~/pbrp-build/recovery-${{ matrix.target }}.img https://raw.githubusercontent.com/Vaz15k/literate-potato/master/Imagens/${{ matrix.target }}/recovery.img
+          
+      - name: Initialize PBRP source
+        run: |
+          cd $HOME/pbrp-12.1
+          repo init -u $PBRP_MANIFEST -b android-12.1 --depth=1
+
+      - name: Sync PBRP source
+        run: |
+          cd $HOME/pbrp-12.1
+          repo sync -c -j$(nproc --all) --force-sync --no-tags --no-clone-bundle
+
+      - name: Patching PBRP for MTP
+        run: |
+          cd $HOME/pbrp-12.1/bootable/recovery
+
+          wget https://raw.githubusercontent.com/snowwolf725/Action-TWRP-Builder-Waffle/refs/heads/main/patch/003-fix-decrypt.patch
+          git apply --whitespace=nowarn 003-fix-decrypt.patch
+
+          cd ../../system/vold
+          wget https://raw.githubusercontent.com/snowwolf725/Action-TWRP-Builder-Waffle/refs/heads/main/patch/003-fix-decrypt2.patch
+          git apply --whitespace=nowarn 003-fix-decrypt2.patch
+
+      - name: Clone device tree
+        run: |
+          cd $HOME/pbrp-12.1
+          git clone --depth=1 --branch pbrp-12.1 ${{ env.DEVICE_TREE_URL }} device/samsung/a54x
+
+      - name: Setup ccache
+        if: github.event.inputs.clean_build != 'true'
+        run: |
+          cd $HOME/pbrp-12.1
+          export USE_CCACHE=1
+          export CCACHE_DIR=~/.ccache
+          ccache -M 8G
+          ccache -z
+
+      - name: Build PBRP Recovery
+        run: |
+          cd $HOME/pbrp-12.1
+          export ALLOW_MISSING_DEPENDENCIES=true
+          export TW_DEFAULT_LANGUAGE="en"
+          if [[ "${{ github.event.inputs.clean_build }}" == "true" ]]; then
+            make clean
+          fi
+          source build/envsetup.sh
+          lunch pb_a54x-eng
+          mka pbrp -j$(nproc --all)
+
+      - name: Package recovery image
+        run: |
+          cp $HOME/pbrp-12.1/out/target/product/a54x/recovery.img $HOME/pbrp-build/pbrp.img
+          cd $HOME/pbrp-build
+          magiskboot unpack pbrp.img
+          magiskboot repack recovery-${{ matrix.target }}.img recovery.img
+          PACKAGE_NAME="PBRP-${{ matrix.target }}_${{ env.DATE }}.tar"
+          tar cf "$PACKAGE_NAME" recovery.img
+          cp PBRP* $HOME/files/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: /home/runner/files/PBRP*
+          name: "PBRP Recovery - ${{ env.DATE }}"
+          tag_name: "pbrp-${{ env.DATE }}"
+          body: |
+            ### Features
+            - Full touch interface
+            - ADB support
+            - MTP support
+            - Decrypt data partition
+            - Backup and restore
+            - LichUI support
+            
+            ### Important Notes
+            - **VBMeta Patched**: https://github.com/Vaz15k/proprietary_vendor_samsung_a54x/releases
+            - Always backup your current recovery before flashing
+            - Ensure you download the correct file for your device model
+            ---
+            <div align="center">
+            <b>Special Thanks:</b><br>
+            - <b>@Vaz15k</b> for device images and resources<br>
+            - <b>@salvogiangri</b> for TWRP tree<br>
+            - <b><a href="https://gitlab.com/OrangeFox">OrangeFox Team</a></b> for build scripts
+            </div>
+          draft: false
+          prerelease: false
+          make_latest: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build_shrp:
+    name: Build SHRP
+    needs: [setup, notify_workflow]
+    runs-on: ubuntu-latest
+    timeout-minutes: 480
+    if: ${{ contains(needs.setup.outputs.matrix, 'SHRP') }}
+    
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ github.event.inputs.target == 'All models' && fromJson('["SM-A546B", "SM-A546E", "SM-A546U", "SM-A546U1", "SM-A546S", "SM-A546W", "SM-A5460", "SM-A546V"]') || fromJson(format('["{0}"]', github.event.inputs.target || 'SM-A546B')) }}
+        
+    steps:          
+      - name: Free up system space
+        uses: rokibhasansagar/slimhub_actions@main
+        
+      - name: Checkout device tree
+        uses: actions/checkout@v4
+        
+      - name: Setup Java JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Python environment
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Configure swap space
+        uses: pierotofy/set-swap-space@master
+        with:
+          swap-size-gb: 12
+
+      - name: Set build variables
+        run: |
+          echo "TARGET_DEVICE=${{ matrix.target }}" >> $GITHUB_ENV
+          echo "RECOVERY_TYPE=SHRP" >> $GITHUB_ENV
+          echo "DATE=$(date +'%Y-%m-%d')" >> $GITHUB_ENV
+
+      - name: Install repo tool
+        run: |
+          mkdir -p ~/bin
+          curl --retry 3 --retry-delay 5 -o ~/bin/repo https://storage.googleapis.com/git-repo-downloads/repo
+          chmod a+x ~/bin/repo
+          sudo ln -sf ~/bin/repo /usr/bin/repo
+
+      - name: Setup build environment
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y git aria2 ccache software-properties-common
+
+          git clone --depth=1 https://gitlab.com/OrangeFox/misc/scripts ~/scripts
+          cd ~/scripts
+          sudo bash setup/android_build_env.sh
+          sed -i 's/cd -/cd ../g' setup/install_android_sdk.sh
+          sudo bash setup/install_android_sdk.sh
+
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git config --global color.ui true
+
+          curl https://pyenv.run | bash
+          export PYENV_ROOT="$HOME/.pyenv" && export PATH="$PYENV_ROOT/bin:$PATH" && eval "$(pyenv init - bash)"
+          sudo apt install -y build-essential libssl-dev zlib1g-dev libbz2-dev libreadline-dev libsqlite3-dev wget curl llvm libncurses5-dev libncursesw5-dev xz-utils tk-dev libffi-dev liblzma-dev python3-openssl git
+          pyenv install 2.7.18
+          sudo ln -sf $HOME/.pyenv/versions/2.7.18/bin/python2.7 /usr/bin/python2.7
+
+      - name: Make directories
+        run: |
+          mkdir -p $HOME/shrp-12.1
+          mkdir -p $HOME/shrp-build
+          mkdir -p $HOME/files
+
+      - name: Prepare device-specific files
+        run: |
+          curl --retry 3 --retry-delay 5 -o ~/bin/magiskboot https://raw.githubusercontent.com/Vaz15k/literate-potato/master/Tools/magiskboot
+          chmod +x ~/bin/magiskboot
+          sudo ln -sf ~/bin/magiskboot /usr/bin/magiskboot
+          curl --retry 5 --retry-delay 5 -o ~/shrp-build/recovery-${{ matrix.target }}.img https://raw.githubusercontent.com/Vaz15k/literate-potato/master/Imagens/${{ matrix.target }}/recovery.img
+
+      - name: Initialize SHRP source
+        run: |
+          cd $HOME/shrp-12.1
+          repo init -u $SHRP_MANIFEST -b shrp-12.1 --depth=1
+
+      - name: Sync SHRP source
+        run: |
+          cd $HOME/shrp-12.1
+          repo sync -j$(nproc --all) --force-sync --no-tags --no-clone-bundle
+
+      - name: Clone device tree
+        run: |
+          cd $HOME/shrp-12.1
+          git clone --depth=1 --branch shrp-12.1 ${{ env.DEVICE_TREE_URL }} device/samsung/a54x
+
+      - name: Setup ccache
+        if: github.event.inputs.clean_build != 'true'
+        run: |
+          cd $HOME/shrp-12.1
+          export USE_CCACHE=1
+          export CCACHE_DIR=~/.ccache
+          ccache -M 8G
+          ccache -z
+
+      - name: Build SHRP Recovery
+        run: |
+          cd $HOME/shrp-12.1
+          export ALLOW_MISSING_DEPENDENCIES=true
+          export TW_DEFAULT_LANGUAGE="en"
+          if [[ "${{ github.event.inputs.clean_build }}" == "true" ]]; then
+            make clean
+          fi
+          source build/envsetup.sh
+          lunch twrp_a54x-eng
+          mka recoveryimage -j$(nproc --all)
+
+      - name: Package recovery image
+        run: |
+          cp $HOME/shrp-12.1/out/target/product/a54x/recovery.img $HOME/shrp-build/shrp.img
+          cd $HOME/shrp-build
+          magiskboot unpack shrp.img
+          magiskboot repack recovery-${{ matrix.target }}.img recovery.img
+          PACKAGE_NAME="SHRP-${{ matrix.target }}_${{ env.DATE }}.tar"
+          tar cf "$PACKAGE_NAME" recovery.img
+          cp SHRP* $HOME/files/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: /home/runner/files/SHRP*
+          name: "SHRP Recovery - ${{ env.DATE }}"
+          tag_name: "shrp-${{ env.DATE }}"
+          body: |
+            ### Features
+            - Full touch interface
+            - ADB support
+            - MTP support
+            - Decrypt data partition
+            - Backup and restore
+            - LichUI support
+            
+            ### Important Notes
+            - **VBMeta Patched**: https://github.com/Vaz15k/proprietary_vendor_samsung_a54x/releases
+            - Always backup your current recovery before flashing
+            - Ensure you download the correct file for your device model
+            ---
+            <div align="center">
+            <b>Special Thanks:</b><br>
+            - <b>@Vaz15k</b> for device images and resources<br>
+            - <b>@salvogiangri</b> for TWRP tree<br>
+            - <b><a href="https://gitlab.com/OrangeFox">OrangeFox Team</a></b> for build scripts
+            </div>
+          draft: false
+          prerelease: false
+          make_latest: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build_orangefox:
+    name: Build OrangeFox
+    needs: [setup, notify_workflow]
+    runs-on: ubuntu-latest
+    timeout-minutes: 480
+    if: ${{ contains(needs.setup.outputs.matrix, 'OrangeFox') }}
+    
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ github.event.inputs.target == 'All models' && fromJson('["SM-A546B", "SM-A546E", "SM-A546U", "SM-A546U1", "SM-A546S", "SM-A546W", "SM-A5460", "SM-A546V"]') || fromJson(format('["{0}"]', github.event.inputs.target || 'SM-A546B')) }}
+        
+    steps:          
+      - name: Free up system space
+        uses: rokibhasansagar/slimhub_actions@main
+        
+      - name: Checkout device tree
+        uses: actions/checkout@v4
+        
+      - name: Setup Java JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Python environment
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Configure swap space
+        uses: pierotofy/set-swap-space@master
+        with:
+          swap-size-gb: 12
+
+      - name: Set build variables
+        run: |
+          echo "TARGET_DEVICE=${{ matrix.target }}" >> $GITHUB_ENV
+          echo "RECOVERY_TYPE=OrangeFox" >> $GITHUB_ENV
+          echo "DATE=$(date +'%Y-%m-%d')" >> $GITHUB_ENV
+
+      - name: Install repo tool
+        run: |
+          mkdir -p ~/bin
+          curl --retry 3 --retry-delay 5 -o ~/bin/repo https://storage.googleapis.com/git-repo-downloads/repo
+          chmod a+x ~/bin/repo
+          sudo ln -sf ~/bin/repo /usr/bin/repo
+
+      - name: Setup build environment
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y git aria2 ccache
+          git clone --depth=1 https://gitlab.com/OrangeFox/misc/scripts ~/scripts
+          cd ~/scripts
+          sudo bash setup/android_build_env.sh
+          sed -i 's/cd -/cd ../g' setup/install_android_sdk.sh
+          sudo bash setup/install_android_sdk.sh
+
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git config --global color.ui true
+
+      - name: Make directories
+        run: |
+          mkdir -p $HOME/ofox-12.1
+          mkdir -p $HOME/ofox-build
+          mkdir -p $HOME/files
+
+      - name: Prepare device-specific files
+        run: |
+          curl --retry 3 --retry-delay 5 -o ~/bin/magiskboot https://raw.githubusercontent.com/Vaz15k/literate-potato/master/Tools/magiskboot
+          chmod +x ~/bin/magiskboot
+          sudo ln -sf ~/bin/magiskboot /usr/bin/magiskboot
+          curl --retry 5 --retry-delay 5 -o ~/ofox-build/recovery-${{ matrix.target }}.img https://raw.githubusercontent.com/Vaz15k/literate-potato/master/Imagens/${{ matrix.target }}/recovery.img
+          
+      - name: Initialize OrangeFox source
+        run: |
+          cd ~/scripts
+          git clone https://gitlab.com/OrangeFox/sync.git
+          cd sync
+          
+      - name: Sync OrangeFox source
+        run: |
+          cd $HOME/scripts/sync
+          ./orangefox_sync.sh --branch 12.1 --path $HOME/ofox-12.1
+
+      - name: Clone device tree
+        run: |
+          cd $HOME/ofox-12.1
+          git clone --depth=1 --branch ofox-12.1 ${{ env.DEVICE_TREE_URL }} device/samsung/a54x
+
+      - name: Setup ccache
+        if: github.event.inputs.clean_build != 'true'
+        run: |
+          cd $HOME/ofox-12.1
+          export USE_CCACHE=1
+          export CCACHE_DIR=~/.ccache
+          ccache -M 8G
+          ccache -z
+
+      - name: Build OrangeFox Recovery
+        run: |
+          set +e
+          cd $HOME/ofox-12.1
+          export ALLOW_MISSING_DEPENDENCIES=true
+          export FOX_BUILD_DEVICE=a54x
+          export LC_ALL="C"
+          if [[ "${{ github.event.inputs.clean_build }}" == "true" ]]; then
+            make clean
+          fi
+          source build/envsetup.sh
+          set -e
+          lunch twrp_a54x-eng
+          mka recoveryimage
+
+      - name: Package recovery image
+        run: |
+          cp $HOME/ofox-12.1/out/target/product/a54x/recovery.img $HOME/ofox-build/ofox.img
+          cd $HOME/ofox-build
+          magiskboot unpack ofox.img
+          magiskboot repack recovery-${{ matrix.target }}.img recovery.img
+          PACKAGE_NAME="OFOX-${{ matrix.target }}_${{ env.DATE }}.tar"
+          tar cf "$PACKAGE_NAME" recovery.img
+          cp OFOX* $HOME/files/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: /home/runner/files/OFOX*
+          name: "OFOX Recovery - ${{ env.DATE }}"
+          tag_name: "ofox-${{ env.DATE }}"
+          body: |
+            ### Features
+            - Full touch interface
+            - ADB support
+            - MTP support
+            - Decrypt data partition
+            - Backup and restore
+            - LichUI support
+            
+            ### Important Notes
+            - **VBMeta Patched**: https://github.com/Vaz15k/proprietary_vendor_samsung_a54x/releases
+            - Always backup your current recovery before flashing
+            - Ensure you download the correct file for your device model
+            ---
+            <div align="center">
+            <b>Special Thanks:</b><br>
+            - <b>@Vaz15k</b> for device images and resources<br>
+            - <b>@salvogiangri</b> for TWRP tree<br>
+            - <b><a href="https://gitlab.com/OrangeFox">OrangeFox Team</a></b> for build scripts
+            </div>
+          draft: false
+          prerelease: false
+          make_latest: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  notify_completion:
+    name: Notify Build Completion
+    needs: [setup, build_twrp, build_pbrp, build_shrp, build_orangefox]
+    runs-on: ubuntu-latest
+    if: always() && (needs.build_twrp.result != 'cancelled' || needs.build_pbrp.result != 'cancelled' || needs.build_shrp.result != 'cancelled' || needs.build_orangefox.result != 'cancelled')
+    steps:
+      - name: Determine build results
+        id: results
+        run: |
+          # Count successful builds
+          success_count=0
+          failed_count=0
+          skipped_count=0
+          total_builds=0
+          
+          # Check each recovery type that was supposed to build
+          matrix="${{ needs.setup.outputs.matrix }}"
+          
+          if echo "$matrix" | grep -q "TWRP"; then
+            total_builds=$((total_builds + 8))
+            if [ "${{ needs.build_twrp.result }}" == "success" ]; then
+              success_count=$((success_count + 8))
+            elif [ "${{ needs.build_twrp.result }}" == "failure" ]; then
+              failed_count=$((failed_count + 8))
+            else
+              skipped_count=$((skipped_count + 8))
+            fi
+          fi
+          
+          if echo "$matrix" | grep -q "PBRP"; then
+            total_builds=$((total_builds + 8))
+            if [ "${{ needs.build_pbrp.result }}" == "success" ]; then
+              success_count=$((success_count + 8))
+            elif [ "${{ needs.build_pbrp.result }}" == "failure" ]; then
+              failed_count=$((failed_count + 8))
+            else
+              skipped_count=$((skipped_count + 8))
+            fi
+          fi
+          
+          if echo "$matrix" | grep -q "SHRP"; then
+            total_builds=$((total_builds + 8))
+            if [ "${{ needs.build_shrp.result }}" == "success" ]; then
+              success_count=$((success_count + 8))
+            elif [ "${{ needs.build_shrp.result }}" == "failure" ]; then
+              failed_count=$((failed_count + 8))
+            else
+              skipped_count=$((skipped_count + 8))
+            fi
+          fi
+          
+          if echo "$matrix" | grep -q "OrangeFox"; then
+            total_builds=$((total_builds + 8))
+            if [ "${{ needs.build_orangefox.result }}" == "success" ]; then
+              success_count=$((success_count + 8))
+            elif [ "${{ needs.build_orangefox.result }}" == "failure" ]; then
+              failed_count=$((failed_count + 8))
+            else
+              skipped_count=$((skipped_count + 8))
+            fi
+          fi
+          
+          echo "success_count=$success_count" >> $GITHUB_OUTPUT
+          echo "failed_count=$failed_count" >> $GITHUB_OUTPUT
+          echo "skipped_count=$skipped_count" >> $GITHUB_OUTPUT
+          echo "total_builds=$total_builds" >> $GITHUB_OUTPUT
+          
+          # Determine overall status
+          if [ $failed_count -eq 0 ] && [ $success_count -gt 0 ]; then
+            echo "status=✅ All builds completed successfully!" >> $GITHUB_OUTPUT
+            echo "emoji=🎉" >> $GITHUB_OUTPUT
+          elif [ $success_count -gt 0 ] && [ $failed_count -gt 0 ]; then
+            echo "status=⚠️ Builds completed with some failures" >> $GITHUB_OUTPUT
+            echo "emoji=⚠️" >> $GITHUB_OUTPUT
+          elif [ $failed_count -gt 0 ]; then
+            echo "status=❌ All builds failed" >> $GITHUB_OUTPUT
+            echo "emoji=💥" >> $GITHUB_OUTPUT
+          else
+            echo "status=⏭️ All builds were skipped" >> $GITHUB_OUTPUT
+            echo "emoji=⏭️" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Send Telegram Completion Notification
+        run: |
+          DATE=$(date +'%Y-%m-%d')
+          
+          # Build the recovery list that was built
+          recovery_list=""
+          matrix="${{ needs.setup.outputs.matrix }}"
+          
+          if echo "$matrix" | grep -q "TWRP"; then
+            recovery_list="$recovery_list• TWRP Recovery
+            "
+          fi
+          if echo "$matrix" | grep -q "PBRP"; then
+            recovery_list="$recovery_list• PBRP Recovery
+            "
+          fi
+          if echo "$matrix" | grep -q "SHRP"; then
+            recovery_list="$recovery_list• SHRP Recovery
+            "
+          fi
+          if echo "$matrix" | grep -q "OrangeFox"; then
+            recovery_list="$recovery_list• OrangeFox Recovery
+            "
+          fi
+          
+          curl -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+            -F chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
+            -F message_thread_id="${{ secrets.TELEGRAM_MESSAGE_THREAD_ID }}" \
+            -F text="
+            ${{ steps.results.outputs.emoji }} *Recovery Build Completed!*
+            
+            📦 *Repository:* [${{ github.repository }}](https://github.com/${{ github.repository }})
+            🗂️ *Products Built:* ${{ github.event.inputs.products }}
+            🎯 *Target Models:* ${{ github.event.inputs.target }}
+            📅 *Date:* $DATE
+            
+            📊 *Build Summary:*
+            ✅ Successful: ${{ steps.results.outputs.success_count }}/${{ steps.results.outputs.total_builds }}
+            ❌ Failed: ${{ steps.results.outputs.failed_count }}/${{ steps.results.outputs.total_builds }}
+            ⏭️ Skipped: ${{ steps.results.outputs.skipped_count }}/${{ steps.results.outputs.total_builds }}
+            
+            🌀 *Recovery Types:*
+            $recovery_list
+            📋 *Status:* ${{ steps.results.outputs.status }}
+            
+            💾 *Download releases:* [GitHub Releases](https://github.com/${{ github.repository }}/releases)
+            [🔗 View GitHub Run](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})" \
+            -F parse_mode="Markdown"
