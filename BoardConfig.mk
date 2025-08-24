@@ -132,3 +132,9 @@ TW_CUSTOM_CPU_POS := 250
 TW_CUSTOM_CLOCK_POS := 50
 TW_CUSTOM_BATTERY_POS := 810
 TW_STATUS_HEIGHT := 70
+
+# PBRB specific
+BETA_BUILD := true
+PB_TORCH_PATH := "/sys/devices/virtual/camera/flash/rear_flash"
+PB_TORCH_MAX_BRIGHTNESS := 1
+MAINTAINER := daglaroglou
