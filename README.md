@@ -1,5 +1,5 @@
 # TWRP Device Tree for Samsung Galaxy A54 5G
-
+# This recovery has encryption, it asks us for our screen password to be able to access the data partition, so it works 100%, proof that it boots on a35x.
 The Galaxy A54 5G (codenamed _"a54x"_) is an upper-mid-range smartphone from Samsung.
 
 It was announced and released in March 2023.
