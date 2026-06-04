@@ -7,3 +7,36 @@
 
 # For building with minimal manifest
 export ALLOW_MISSING_DEPENDENCIES=true
+
+# OrangeFox specific flags
+export OF_MAINTAINER="daglaroglou"
+export LC_ALL="C"
+
+export FOX_USE_TWRP_RECOVERY_IMAGE_BUILDER=1
+export OF_DISABLE_MIUI_SPECIFIC_FEATURES=1
+export FOX_VANILLA_BUILD=1
+export FOX_NO_SAMSUNG_SPECIAL=0
+export FOX_DYNAMIC_SAMSUNG_FIX=1
+
+export OF_DEFAULT_KEYMASTER_VERSION=4.1
+
+export FOX_USE_TAR_BINARY=1
+export FOX_USE_SED_BINARY=1
+export FOX_USE_XZ_UTILS=1
+
+export FOX_DELETE_AROMAFM=1
+export FOX_DELETE_MAGISK_ADDON=1
+
+export OF_FL_PATH1="/tmp/flashlight"
+export OF_FL_PATH2="/sys/devices/virtual/camera/flash/rear_flash"
+export OF_FLASHLIGHT_ENABLE=1
+
+export OF_USE_MAGISKBOOT=1
+export OF_USE_MAGISKBOOT_FOR_ALL_PATCHES=1
+
+# Fix status bar
+export OF_SCREEN_H=2340
+export OF_STATUS_H=86
+export OF_STATUS_INDENT_LEFT=58
+export OF_STATUS_INDENT_RIGHT=58
+export OF_CLOCK_POS=1
