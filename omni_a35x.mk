@@ -1,53 +1,96 @@
-#
-# Copyright (C) 2024 The Android Open Source Project
-# Copyright (C) 2024 The TWRP Open Source Project
-#
-# SPDX-License-Identifier: Apache-2.0
-#
+name: SHRP-Reborn Recovery Build (A35X)
 
-# =========================
-# CONFIG BÁSICA DEL DEVICE
-# =========================
+on:
+  workflow_dispatch:
+    inputs:
+      DEVICE:
+        description: "Device codename"
+        required: true
+        default: "a35x"
 
-PRODUCT_PLATFORM := erd8835
+jobs:
+  build:
+    runs-on: ubuntu-22.04
 
-# Nombre fijo del device (evita errores de parsing)
-PRODUCT_RELEASE_NAME := a35x
+    env:
+      USE_CCACHE: 1
+      CCACHE_COMPRESS: 1
+      CCACHE_MAXSIZE: 5G
 
-# Vendor del árbol (AJUSTA si usas otro)
-CUSTOM_VENDOR := shrp
+    steps:
 
-# OEM / fabricante real del device
-BOARD_VENDOR := samsung
+    # =========================
+    # 🔥 FREE DISK SPACE (IMPORTANT)
+    # =========================
+    - name: Free disk space
+      run: |
+        sudo rm -rf /usr/share/dotnet
+        sudo rm -rf /opt/ghc
+        sudo rm -rf /usr/local/lib/android
+        sudo apt-get clean
+        sudo rm -rf /var/lib/apt/lists/*
+        sudo rm -rf /tmp/*
+        df -h
 
-# =========================
-# IDENTIFICADORES DEL BUILD
-# =========================
+    # =========================
+    # 📦 DEPENDENCIES
+    # =========================
+    - name: Install packages
+      run: |
+        sudo apt update
+        sudo apt install -y git curl zip unzip wget bc python3 repo
 
-PRODUCT_DEVICE := $(PRODUCT_RELEASE_NAME)
-PRODUCT_NAME := $(CUSTOM_VENDOR)_$(PRODUCT_DEVICE)
-PRODUCT_BRAND := $(BOARD_VENDOR)
-PRODUCT_MODEL := SAMSUNG_$(PRODUCT_DEVICE)
-PRODUCT_MANUFACTURER := $(BOARD_VENDOR)
+    # =========================
+    # 📥 INIT SHRP-REBORN (UPDATED)
+    # =========================
+    - name: Init repo (SHRP-Reborn)
+      run: |
+        mkdir shrp && cd shrp
+        repo init -u https://github.com/SHRP-Reborn/manifest.git -b shrp-12.1 --depth=1
 
-# Path del device
-DEVICE_PATH := device/$(BOARD_VENDOR)/$(PRODUCT_DEVICE)
+    # =========================
+    # 🔄 SYNC SOURCE (LIGHT)
+    # =========================
+    - name: Sync repo
+      run: |
+        cd shrp
+        repo sync -c --no-tags --no-clone-bundle --force-sync -j2
 
-# =========================
-# INHERIT BASE SYSTEM
-# =========================
+    # =========================
+    # 📱 DEVICE TREE (A35X)
+    # =========================
+    - name: Clone device tree
+      run: |
+        cd shrp
+        git clone https://github.com/christiandroid20/android_device_samsung_a54x device/samsung/a35x
 
-$(call inherit-product, $(SRC_TARGET_DIR)/product/base.mk)
-$(call inherit-product, $(SRC_TARGET_DIR)/product/core_64_bit_only.mk)
+    # =========================
+    # ⚙️ BUILD ENV
+    # =========================
+    - name: Setup build environment
+      run: |
+        cd shrp
+        source build/envsetup.sh
+        lunch omni_a35x-eng
 
-# =========================
-# COMMON CONFIG (SHRP/TWRP)
-# =========================
+    # =========================
+    # 🚀 BUILD RECOVERY
+    # =========================
+    - name: Build recovery
+      run: |
+        cd shrp
+        export LC_ALL=C
+        export ALLOW_MISSING_DEPENDENCIES=true
+        export TZ=UTC
 
-$(call inherit-product, vendor/$(CUSTOM_VENDOR)/config/common.mk)
+        mka recoveryimage -j2
 
-# =========================
-# DEVICE TREE
-# =========================
-
-$(call inherit-product, $(DEVICE_PATH)/device.mk)
+    # =========================
+    # 📤 UPLOAD ARTIFACT
+    # =========================
+    - name: Upload recovery
+      uses: actions/upload-artifact@v4
+      with:
+        name: SHRP-Reborn-A35X
+        path: |
+          shrp/out/target/product/*/recovery.img
