@@ -126,9 +126,9 @@ TW_INCLUDE_LPDUMP := true
 TW_INCLUDE_LPTOOLS := true
 
 # SHRP specific
-SHRP_DEVICE_CODE := a54x
+SHRP_DEVICE_CODE := a35x
 SHRP_PATH := device/samsung/$(SHRP_DEVICE_CODE)
-SHRP_MAINTAINER := daglaroglou
+SHRP_MAINTAINER := ChristyGaming18
 SHRP_REC_TYPE := Treble
 SHRP_DEVICE_TYPE := A/B
 SHRP_REC := "/dev/block/bootdevice/by-name/recovery"
