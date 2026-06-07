@@ -46,7 +46,7 @@ BOARD_MKBOOTIMG_ARGS := \
     --dtb_offset 0 \
     --os_version 13.0.0 \
     --tags_offset 0 \
-    --board SRPVI13A001 \
+    --board SRPWK02A003 \
     --header_version 2
 BOARD_ROOT_EXTRA_FOLDERS := \
     carrier \
