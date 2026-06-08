@@ -30,24 +30,30 @@ BOARD_CUSTOM_BOOTIMG_MK := $(DEVICE_PATH)/mkbootimg.mk
 
 TARGET_KERNEL_ARCH := $(TARGET_ARCH)
 BOARD_KERNEL_IMAGE_NAME := Image
-TARGET_PREBUILT_KERNEL := $(DEVICE_PATH)/prebuilt/$(BOARD_KERNEL_IMAGE_NAME)
+TARGET_PREBUILT_KERNEL := $(DEVICE_PATH)/prebuilt/Image
+
+# DTB / DTBO (FIX UFDT)
 BOARD_INCLUDE_RECOVERY_DTBO := true
 BOARD_PREBUILT_DTBOIMAGE := $(DEVICE_PATH)/prebuilt/dtbo.img
+BOARD_PREBUILT_DTBIMAGE := $(DEVICE_PATH)/prebuilt/dtb.img
+
 BOARD_RAMDISK_USE_LZ4 := true
 
+# Kernel cmdline (FIX Samsung UFDT)
 BOARD_KERNEL_CMDLINE := \
     bootconfig \
-    buildtime_bootconfig=enable \
-    loop.max_part=7
+    loop.max_part=7 \
+    androidboot.dtbo_idx=0
+
 BOARD_KERNEL_PAGESIZE := 4096
+
+# mkbootimg (CRITICAL FIX - NO DTB HERE)
 BOARD_MKBOOTIMG_ARGS := \
-    --dtb $(DEVICE_PATH)/prebuilt/dtbo.img \
-    --ramdisk_offset 0 \
-    --dtb_offset 0 \
+    --header_version 2 \
     --os_version 13.0.0 \
-    --tags_offset 0 \
-    --board SRPWK02A003 \
-    --header_version 2
+    --board SRPWK02A003
+
+# Partitions / layout extras
 BOARD_ROOT_EXTRA_FOLDERS := \
     carrier \
     efs \
@@ -59,7 +65,7 @@ BOARD_ROOT_EXTRA_FOLDERS := \
 # SELinux
 BOARD_SEPOLICY_DIRS += $(DEVICE_PATH)/sepolicy
 
-# Android Verified Boot
+# AVB
 BOARD_AVB_ENABLE := false
 
 # Properties
@@ -69,7 +75,6 @@ TARGET_VENDOR_PROP += $(DEVICE_PATH)/vendor.prop
 BOARD_FLASH_BLOCK_SIZE := 4096
 BOARD_BOOTIMAGE_PARTITION_SIZE := 67108864
 BOARD_DTBOIMG_PARTITION_SIZE := 8388608
-#BOARD_INIT_BOOT_IMAGE_PARTITION_SIZE := 16777216
 BOARD_VENDOR_BOOTIMAGE_PARTITION_SIZE := 33554432
 BOARD_RECOVERYIMAGE_PARTITION_SIZE := 100663296
 
@@ -80,7 +85,7 @@ TARGET_USERIMAGES_USE_F2FS := true
 BOARD_SUPER_PARTITION_SIZE := 11429478400
 BOARD_SUPER_PARTITION_GROUPS := group_basic
 BOARD_GROUP_BASIC_SIZE := 11425284096
-BOARD_GROUP_BASIC_PARTITION_LIST := system odm product vendor vendor_dlkm # TODO system_dlkm
+BOARD_GROUP_BASIC_PARTITION_LIST := system odm product vendor vendor_dlkm
 
 BOARD_PARTITION_LIST := $(call to-upper, $(BOARD_GROUP_BASIC_PARTITION_LIST))
 $(foreach p, $(BOARD_PARTITION_LIST), $(eval BOARD_$(p)IMAGE_FILE_SYSTEM_TYPE := erofs))
@@ -88,6 +93,8 @@ $(foreach p, $(BOARD_PARTITION_LIST), $(eval TARGET_COPY_OUT_$(p) := $(call to-l
 
 # Encryption
 BOARD_USES_METADATA_PARTITION := true
+
+# Fake platform versions (SHRP/TWRP workaround)
 PLATFORM_VERSION := 99.87.36
 PLATFORM_VERSION_LAST_STABLE := $(PLATFORM_VERSION)
 PLATFORM_SECURITY_PATCH := 2099-12-31
@@ -99,10 +106,7 @@ TARGET_RECOVERY_PIXEL_FORMAT := RGBX_8888
 TARGET_RECOVERY_FSTAB := $(DEVICE_PATH)/recovery.fstab
 RECOVERY_SDCARD_ON_DATA := true
 
-# Use mke2fs to create ext4 images
-TARGET_USES_MKE2FS := true
-
-# TWRP specific build flags
+# TWRP flags
 TW_THEME := portrait_hdpi
 TW_BRIGHTNESS_PATH := "/sys/class/backlight/panel/brightness"
 TW_MAX_BRIGHTNESS := 510
@@ -111,21 +115,9 @@ TW_FRAMERATE := 120
 TW_NO_REBOOT_BOOTLOADER := true
 TW_HAS_DOWNLOAD_MODE := true
 TW_USE_SERIALNO_PROPERTY_FOR_DEVICE_ID := true
-TW_BACKUP_EXCLUSIONS := /data/fonts/files
-TW_EXTRA_LANGUAGES := true
-TW_EXCLUDE_APEX := true
-TW_NO_EXFAT_FUSE := true
-TW_EXCLUDE_DEFAULT_USB_INIT := true
 TW_INCLUDE_CRYPTO := true
-TW_FORCE_KEYMASTER_VER := true
-TW_ENABLE_FS_COMPRESSION := true
-TW_INCLUDE_NTFS_3G := true
-TW_INCLUDE_RESETPROP := true
-TW_INCLUDE_REPACKTOOLS := true
-TW_INCLUDE_LPDUMP := true
-TW_INCLUDE_LPTOOLS := true
 
-# SHRP specific
+# SHRP config
 SHRP_DEVICE_CODE := a35x
 SHRP_PATH := device/samsung/$(SHRP_DEVICE_CODE)
 SHRP_MAINTAINER := ChristyGaming18
