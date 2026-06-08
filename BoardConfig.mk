@@ -41,7 +41,7 @@ BOARD_KERNEL_CMDLINE := \
     loop.max_part=7
 BOARD_KERNEL_PAGESIZE := 4096
 BOARD_MKBOOTIMG_ARGS := \
-    --dtb.img $(DEVICE_PATH)/prebuilt/dtb \
+    --dtb $(DEVICE_PATH)/prebuilt/dtbo.img \
     --ramdisk_offset 0 \
     --dtb_offset 0 \
     --os_version 13.0.0 \
