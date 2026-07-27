@@ -40,7 +40,7 @@ This device tree was tested and is fully compatible with [minimal-manifest-twrp]
 2. In the root folder of the fetched repo, clone the device tree:
 
 ```bash
-git clone https://github.com/TeamWin/android_device_samsung_a54x.git -b android-12.1 device/samsung/a54x
+git clone https://github.com/christiandroid20/shrp_device_samsung_a35x.git -b twrp-12.1 device/samsung/a35x
 ```
 
 3. To build:
