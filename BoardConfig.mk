@@ -122,15 +122,13 @@ TW_EXCLUDE_APEX := true
 TW_NO_EXFAT_FUSE := true
 TW_EXCLUDE_DEFAULT_USB_INIT := true
 TW_INCLUDE_CRYPTO := true
+TW_FORCE_KEYMASTER_VER := true
 TW_ENABLE_FS_COMPRESSION := true
 TW_INCLUDE_NTFS_3G := true
 TW_INCLUDE_RESETPROP := true
 TW_INCLUDE_REPACKTOOLS := true
 TW_INCLUDE_LPDUMP := true
 TW_INCLUDE_LPTOOLS := true
-TW_INCLUDE_FBE := true
-TW_INCLUDE_FBE_METADATA_DECRYPT := true
-TW_USE_FSCRYPT_POLICY := 2
 
 # SHRP specific
 SHRP_DEVICE_CODE := a35x
@@ -155,3 +153,7 @@ SHRP_DARK := true
 SHRP_CUSTOM_FLASHLIGHT := true
 SHRP_FONP_1 := "/sys/devices/virtual/camera/flash/rear_flash"
 SHRP_FLASH_MAX_BRIGHTNESS := 200
+
+# Identidad de la versión mostrada en la UI (Android.mk del core hace:
+# -DTW_DEVICE_VERSION='"-$(TW_DEVICE_VERSION)"' -> queda "<base>-ChristyGaming18")
+TW_DEVICE_VERSION := ChristyGaming18
